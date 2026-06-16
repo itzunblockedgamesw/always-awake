@@ -1,15 +1,15 @@
 # ============================================
-# DISCORD USER ACCOUNT KEEP-ALIVE
-# Using discord.py-self for user tokens
+# DISCORD KEEP-ALIVE - REQUESTS ONLY
+# No discord.py needed at all!
 # ============================================
 
-import discord
-from discord.ext import commands
+import requests
 import os
+import time
 from datetime import datetime
 import threading
 from flask import Flask, jsonify
-import asyncio
+import json
 
 # ============================================
 # CONFIGURATION
@@ -31,7 +31,6 @@ app = Flask(__name__)
 def home():
     return jsonify({
         'status': 'online',
-        'user': bot.user.name if bot.user else 'unknown',
         'timestamp': datetime.now().isoformat()
     })
 
@@ -44,56 +43,90 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 # ============================================
-# DISCORD CLIENT - Using discord.py-self
+# DISCORD FUNCTIONS
 # ============================================
 
-# Use self_bot=True for user accounts
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.presences = True
-intents.guilds = True
-
-# This is the key - use self_bot=True
-bot = commands.Bot(
-    command_prefix='!', 
-    self_bot=True,  # IMPORTANT: This enables user account mode
-    intents=intents
-)
-
-@bot.event
-async def on_ready():
-    print("=" * 50)
-    print("✅ DISCORD USER ACCOUNT IS ONLINE!")
-    print("=" * 50)
-    print(f"📡 Logged in as: {bot.user.name}")
-    print(f"🆔 User ID: {bot.user.id}")
-    print(f"💬 Status: {STATUS}")
-    print(f"📅 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 50)
+def get_user_info():
+    """Get user info to verify token works"""
+    headers = {
+        "Authorization": TOKEN,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
     
-    # Set status
-    await bot.change_presence(
-        status=discord.Status.online,
-        activity=discord.Game(name=STATUS)
-    )
+    try:
+        response = requests.get(
+            "https://discord.com/api/v9/users/@me",
+            headers=headers
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Logged in as: {data.get('username')}#{data.get('discriminator')}")
+            print(f"🆔 User ID: {data.get('id')}")
+            return data
+        else:
+            print(f"❌ Failed to get user info: {response.status_code}")
+            print(f"Response: {response.text}")
+            return None
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return None
 
-@bot.event
-async def on_message(message):
-    await bot.process_commands(message)
+def set_status():
+    """Set Discord status using API directly"""
+    headers = {
+        "Authorization": TOKEN,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    
+    payload = {
+        "status": "online",
+        "activities": [
+            {
+                "name": STATUS,
+                "type": 0  # 0 = Playing
+            }
+        ],
+        "afk": False
+    }
+    
+    try:
+        response = requests.patch(
+            "https://discord.com/api/v9/users/@me/settings",
+            headers=headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            print(f"✅ Status updated to: {STATUS}")
+            return True
+        else:
+            print(f"❌ Failed to update status: {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"❌ Error setting status: {e}")
+        return False
 
-# Simple commands
-@bot.command(name='ping')
-async def ping(ctx):
-    await ctx.send(f"🏓 Pong! {round(bot.latency * 1000)}ms")
-
-@bot.command(name='status')
-async def set_status(ctx, *, status):
-    await bot.change_presence(
-        status=discord.Status.online,
-        activity=discord.Game(name=status)
-    )
-    await ctx.send(f"✅ Status changed to: {status}")
+def keep_alive_loop():
+    """Keep the account alive"""
+    print("🔄 Keep-alive loop started")
+    
+    # Get user info first
+    user = get_user_info()
+    if not user:
+        print("❌ Token invalid! Please check your Discord token.")
+        return
+    
+    # Set initial status
+    set_status()
+    
+    # Update every 4 minutes
+    while True:
+        time.sleep(240)  # 4 minutes
+        set_status()
+        print(f"💓 Keep-alive at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ============================================
 # STARTUP
@@ -103,11 +136,18 @@ if __name__ == "__main__":
     # Start Flask
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    print("🌐 Web server started")
-    print("🚀 Starting Discord client with discord.py-self...")
+    print("🌐 Web server started on port 8080")
+    print("=" * 50)
+    print("🚀 Discord Keep-Alive Starting...")
     print("=" * 50)
     
+    # Start keep-alive in background
+    keep_alive_thread = threading.Thread(target=keep_alive_loop, daemon=True)
+    keep_alive_thread.start()
+    
+    # Keep main thread alive
     try:
-        bot.run(TOKEN)
-    except Exception as e:
-        print(f"❌ Error: {e}")
+        while True:
+            time.sleep(60)
+    except KeyboardInterrupt:
+        print("\n👋 Shutting down...")
